@@ -1,0 +1,37 @@
+# gitleaks configuration.
+#
+# Extends the upstream default ruleset rather than replacing it - a custom
+# config silently drops every built-in rule unless it inherits explicitly.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Documented non-secrets and locally-generated files that are never committed"
+
+paths = [
+  # Terraform state holds every real secret in plaintext. It is gitignored
+  # and must never be committed; the working-tree scan would otherwise fail
+  # on a developer's own machine for files that are correctly excluded.
+  # This allowlist does not weaken the history scan, which is what actually
+  # gates whether a secret reached the repository.
+  '''terraform/terraform\.tfstate.*''',
+  '''.*\.tfplan$''',
+  '''(^|/)tfplan$''',
+  # Per-developer bundles written by scripts/dev-setup.sh - contain a live
+  # bearer token by design, gitignored.
+  '''(^|/)dev-config-[^/]+/.*''',
+  # Real env files. The committed *.env.example templates carry only
+  # placeholders and are deliberately still scanned.
+  '''(^|/)\.env$''',
+  '''opencode/\.env$''',
+]
+
+regexes = [
+  # Placeholder credentials in documentation and local-testing examples.
+  # These are the literal strings a reader is told to replace, not secrets.
+  '''local-dev-token''',
+  '''test-key''',
+  '''your-elastic-cloud-api-key''',
+  '''your-elastic-org-id''',
+  '''<paste terraform output -raw proxy_api_key>''',
+]

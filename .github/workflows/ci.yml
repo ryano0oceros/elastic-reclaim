@@ -72,6 +72,27 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@v2
+      # Run the binary directly rather than gitleaks/gitleaks-action@v2. The
+      # action derives a commit range from the push event and scans
+      # `<before>^..<after>`, which fails outright when <before> is a root
+      # commit - there is no parent to resolve. That is the state this
+      # repository is in after publishing from a squashed history.
+      #
+      # `detect` over the full history is also strictly the stronger check:
+      # it re-scans everything on every run instead of only the pushed range,
+      # so a secret cannot slip in via a path the incremental scan skipped.
+      # The history here is small enough that the cost is negligible.
+      - name: Install gitleaks
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_VERSION: 8.24.3
+        run: |
+          curl -fsSL \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            | tar -xz -C /usr/local/bin gitleaks
+          gitleaks version
+      - name: Scan full history
+        run: gitleaks detect --redact --verbose --exit-code 1
+      # Belt and braces: `detect` reads git history, so an uncommitted or
+      # untracked file in the working tree is invisible to it.
+      - name: Scan working tree
+        run: gitleaks detect --no-git --redact --verbose --exit-code 1
