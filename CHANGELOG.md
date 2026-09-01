@@ -12,6 +12,23 @@ current behaviour.
 
 ## [Unreleased]
 
+### Changed
+
+- All GitHub Actions are pinned to a full commit SHA with the version as a
+  trailing comment. A mutable tag means a compromised upstream action runs
+  with access to the workflow; Dependabot still tracks the pins via the
+  comment. Flagged by the CodeQL `actions` analysis.
+
+### Fixed
+
+- The Secret scan CI job, which could not run against a squashed history:
+  `gitleaks-action` scans `<before>^..<after>` from the push event, and a
+  root commit has no parent. Runs the binary directly over full history
+  instead, plus a `--no-git` pass for the working tree, with a
+  `.gitleaks.toml` allowlisting gitignored local files and documented
+  placeholders.
+- Removed an unused import in `proxy/tests/test_translator.py`.
+
 ## [0.0.1] - 2026-09-01
 
 Initial public release. This is a **proof of concept** - see the security

@@ -1,7 +1,5 @@
 import json
 
-import pytest
-
 from app.schemas import ChatCompletionRequest, ChatMessage
 from app.translator import (
     collect_non_streaming_response,
