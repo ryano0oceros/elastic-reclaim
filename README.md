@@ -87,6 +87,8 @@ queries.
 | Platform team (owns Elastic + AWS) | [docs/platform-team.md](docs/platform-team.md) |
 | Developers (use the agent) | [docs/developer-onboarding.md](docs/developer-onboarding.md) |
 | Reporting a vulnerability / deploying safely | [SECURITY.md](SECURITY.md) |
+| Contributing a change | [CONTRIBUTING.md](CONTRIBUTING.md) |
+| Release history | [CHANGELOG.md](CHANGELOG.md) |
 
 ## File tree
 

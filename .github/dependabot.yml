@@ -1,0 +1,52 @@
+version: 2
+
+updates:
+  # Python dependencies for the proxy. CI already gates on pip-audit, but that
+  # fails the build on a known CVE - Dependabot is what actually opens the PR
+  # that fixes it.
+  - package-ecosystem: pip
+    directory: /proxy
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # One PR for routine bumps keeps review noise down; security fixes are
+      # raised separately and immediately by Dependabot security updates.
+      python-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  # Workflow actions. These run with access to the repository and, in the
+  # image job, to the Docker daemon - an unpinned or stale third-party action
+  # is a supply-chain risk, so keep them current.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      actions:
+        update-types:
+          - major
+          - minor
+          - patch
+
+  # Base image for the proxy container (python:X-slim). The Dockerfile also
+  # runs apt-get upgrade at build time, but that cannot move to a new Python
+  # base release on its own.
+  - package-ecosystem: docker
+    directory: /proxy
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+
+  # Terraform provider version pins (terraform/versions.tf). Note the
+  # ec_elasticsearch_project resource is in technical preview upstream - read
+  # the provider changelog before merging an elastic/ec bump, as its schema
+  # can change between releases.
+  - package-ecosystem: terraform
+    directory: /terraform
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3

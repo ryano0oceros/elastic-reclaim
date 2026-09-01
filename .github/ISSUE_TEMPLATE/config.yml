@@ -1,0 +1,12 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/ryano0oceros/elastic-reclaim/security/advisories/new
+    about: >
+      Report privately. Do not open a public issue for a security
+      vulnerability. See SECURITY.md for what to include.
+  - name: Deploying this safely
+    url: https://github.com/ryano0oceros/elastic-reclaim/blob/main/SECURITY.md
+    about: >
+      This is a proof of concept with deliberate security tradeoffs - no TLS
+      and an open default CIDR. Read this before deploying it anywhere.

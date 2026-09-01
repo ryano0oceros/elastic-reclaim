@@ -1,0 +1,45 @@
+name: Change proposal
+description: Propose a change or improvement before writing code
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This project is a **proof of concept**. Changes that make the
+        demonstrated pattern clearer, safer, or more correct are more likely
+        to land than broad new features.
+
+        Several limitations are deliberate and already tracked - no TLS, the
+        `0.0.0.0/0` default CIDR, self-reported `X-EIS-User`, and local
+        Terraform state. Please check the README's "Future enhancements" and
+        "Production considerations" sections first.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What is wrong, unclear, or missing today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: What would you change, and roughly how?
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches, and why this one is preferable.
+
+  - type: checkboxes
+    id: checked
+    attributes:
+      label: Confirmations
+      options:
+        - label: I checked that this is not an already-documented deliberate tradeoff
+          required: true
