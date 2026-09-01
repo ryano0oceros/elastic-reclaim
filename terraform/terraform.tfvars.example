@@ -1,0 +1,11 @@
+# Copy to terraform.tfvars and fill in. Never commit terraform.tfvars - it's
+# already excluded in .gitignore.
+
+ec_api_key         = "your-elastic-cloud-api-key"
+ec_organization_id = "your-elastic-org-id"
+ec_region          = "aws-us-east-1"
+
+aws_region = "us-east-1"
+
+# Lock this down to your workstation/office CIDR once you're past initial testing.
+allowed_cidr_blocks = ["0.0.0.0/0"]

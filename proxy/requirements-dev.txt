@@ -1,0 +1,5 @@
+-r requirements.txt
+pytest==9.1.1
+pytest-asyncio==1.4.0
+# starlette's TestClient prefers httpx2 over httpx as of starlette 1.2+; dev/test only.
+httpx2==2.12.0

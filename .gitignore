@@ -1,0 +1,38 @@
+# Terraform
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/terraform.tfvars
+
+# Plan files embed a full copy of state - including every sensitive value in
+# PLAINTEXT - regardless of `sensitive = true` markings. A committed plan
+# leaks provider credentials, generated passwords and secret payloads.
+# Matched three ways on purpose: a bare `tfplan` (the conventional
+# `terraform plan -out=tfplan`) is NOT caught by a `*.tfplan` glob, which is
+# exactly how one was committed here once.
+terraform/*.tfplan
+tfplan
+*.tfplan
+
+# Written by scripts/deploy.sh from the local git SHA - deploy-machine state,
+# not source.
+terraform/image_tag.auto.tfvars
+
+# Python
+proxy/__pycache__/
+proxy/**/__pycache__/
+proxy/.venv/
+proxy/*.egg-info/
+proxy/.pytest_cache/
+
+# Env files
+.env
+opencode/.env
+
+.DS_Store
+
+# scripts/dev-setup.sh writes a real bearer token into these bundles - they
+# live in the repo dir by default, so keep them out of git.
+dev-config-*/
+*.env
+!*.env.example

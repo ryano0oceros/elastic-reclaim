@@ -1,0 +1,37 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "eis-proxy/claude-sonnet",
+  "provider": {
+    "eis-proxy": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Elastic Inference Service (via AWS proxy)",
+      "options": {
+        "baseURL": "{env:OPENAI_API_BASE}",
+        "apiKey": "{env:OPENAI_API_KEY}",
+        "headers": {
+          "X-EIS-User": "<your-username>"
+        }
+      },
+      "models": {
+        "claude-opus": {
+          "name": "claude-opus (via EIS)"
+        },
+        "claude-sonnet": {
+          "name": "claude-sonnet (via EIS)"
+        },
+        "gemini-flash": {
+          "name": "gemini-flash (via EIS)"
+        },
+        "gemini-pro": {
+          "name": "gemini-pro (via EIS)"
+        },
+        "gpt-sol": {
+          "name": "gpt-sol (via EIS)"
+        },
+        "gpt-terra": {
+          "name": "gpt-terra (via EIS)"
+        }
+      }
+    }
+  }
+}
