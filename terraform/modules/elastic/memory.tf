@@ -28,17 +28,30 @@ resource "elasticstack_elasticsearch_index_template" "memory" {
         "@timestamp" = { type = "date" }
         user         = { type = "keyword" }
         model_alias  = { type = "keyword" }
+        # The embedded field is question AND answer together, not the
+        # question alone. Tested against real history: developer questions
+        # are often short and context-free ("rework the last slide"), so the
+        # retrievable substance lives in the answer. Embedding only the
+        # prompt returned confident nonsense.
+        #
         # semantic_text chunks and embeds at ingest via the referenced
         # inference endpoint - no embedding code in the proxy, and queries
         # embed the search string with the same model automatically.
-        prompt = {
+        memo = {
           type         = "semantic_text"
           inference_id = var.memory_inference_id
         }
-        # Kept as plain text: the answer is what you read once the prompt has
-        # matched, and embedding it too would roughly double ingest cost for
-        # little retrieval gain on a coding-assistant corpus.
-        response     = { type = "text" }
+        # Plain copies for display; `memo` is what retrieval scores against.
+        # `topic` is the conversation's opening question, which is what makes
+        # an anaphoric follow-up ("summarize that") intelligible on its own.
+        topic    = { type = "text" }
+        prompt   = { type = "text" }
+        response = { type = "text" }
+        # One user question drives many proxy requests inside an agent loop,
+        # each carrying the same latest user turn. Rather than dedupe on
+        # write (which would need cross-request state), searches collapse on
+        # this hash so recall returns one row per question asked.
+        prompt_hash  = { type = "keyword" }
         total_tokens = { type = "long" }
       }
     })

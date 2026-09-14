@@ -11,6 +11,7 @@ delays, or fails the completion the developer is waiting on.
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 import time
@@ -32,6 +33,20 @@ _MAX_CONVERSATION_CHARS = 6000
 # Recall shows an excerpt to orient you, not the full answer - the agent can
 # always ask a follow-up. Caps index size and keeps tool output readable.
 _MAX_MEMORY_RESPONSE_CHARS = 2000
+# An LLM gateway sees the client's own housekeeping prompts, not just the
+# developer's. OpenCode injects a title-generation instruction as a leading
+# user turn, which a naive "first user message = topic" rule mistakes for the
+# subject of the conversation. Matched case-insensitively on the opening
+# text; extend as clients add their own internal prompts.
+_CLIENT_HOUSEKEEPING_PREFIXES = (
+    "generate a title for this conversation",
+    "attached media from tool result",
+)
+
+
+def _is_client_housekeeping(text: str) -> bool:
+    lowered = text.strip().lower()
+    return any(lowered.startswith(p) for p in _CLIENT_HOUSEKEEPING_PREFIXES)
 
 # Keeps strong references to in-flight writes (create_task alone is not
 # enough - the loop holds tasks weakly) and gives tests a drain() hook.
@@ -184,6 +199,35 @@ class UsageCollector:
         return None
 
     @staticmethod
+    def _first_user_prompt(messages: list[dict] | None) -> str | None:
+        """The conversation's opening question - its topic.
+
+        Needed because many turns are anaphoric follow-ups ("summarize that
+        in one sentence", "include it"). Their answers are valuable but their
+        prompts are meaningless in isolation, so a memory row built from the
+        latest turn alone is unreadable and retrieves badly. The opening
+        question supplies the missing subject.
+        """
+        for message in messages or []:
+            if not isinstance(message, dict) or message.get("role") != "user":
+                continue
+            content = message.get("content")
+            if isinstance(content, str):
+                text = content.strip()
+            elif isinstance(content, list):
+                text = " ".join(
+                    part.get("text", "")
+                    for part in content
+                    if isinstance(part, dict) and part.get("type") == "text"
+                ).strip()
+            else:
+                continue
+            if not text or _is_client_housekeeping(text):
+                continue
+            return text[:_MAX_USER_PROMPT_CHARS]
+        return None
+
+    @staticmethod
     def _readable_conversation(messages: list[dict] | None) -> str | None:
         """A plain-text transcript of the exchange.
 
@@ -270,12 +314,31 @@ class UsageCollector:
         # and an empty semantic_text field costs an inference call to embed.
         if not prompt or not response:
             return None
+        excerpt = response[:_MAX_MEMORY_RESPONSE_CHARS]
+        topic = self._first_user_prompt(self.request_messages)
+        # Only carry the topic when it adds something - on a first turn the
+        # opening question and the latest question are the same string.
+        memo = (
+            f"Topic: {topic}\nQ: {prompt}\nA: {excerpt}"
+            if topic and topic != prompt
+            else f"Q: {prompt}\nA: {excerpt}"
+        )
         return {
             "@timestamp": datetime.now(timezone.utc).isoformat(),
             "user": self.user,
             "model_alias": self.model_alias,
+            # Embedded field: topic, question and answer together. A
+            # developer's question is often too short - or too anaphoric - to
+            # retrieve on alone.
+            "memo": memo,
+            "topic": topic,
             "prompt": prompt,
-            "response": response[:_MAX_MEMORY_RESPONSE_CHARS],
+            "response": excerpt,
+            # Lets recall collapse the many agent-loop requests that share
+            # one user question down to a single result.
+            "prompt_hash": hashlib.sha1(
+                prompt.strip().lower().encode("utf-8")
+            ).hexdigest(),
             "total_tokens": self.usage.get("total_tokens"),
         }
 

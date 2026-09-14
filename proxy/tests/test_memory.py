@@ -29,6 +29,10 @@ def test_memory_event_keeps_question_and_answer_only():
     e = _collector().memory_event()
     assert e["prompt"] == "how should I embed the chat history?"
     assert e["response"] == "Use ELSER."
+    # The embedded field carries both, since short questions do not retrieve.
+    assert e["memo"] == "Q: how should I embed the chat history?\nA: Use ELSER."
+    assert e["topic"] == e["prompt"]
+    assert len(e["prompt_hash"]) == 40
     assert e["user"] == "alice"
     # Deliberately narrower than a capture: no system prompt, no raw JSON.
     assert "request_text" not in e and "conversation_text" not in e
@@ -73,7 +77,9 @@ async def test_search_is_scoped_to_the_calling_user():
         out = await search_memory(c, settings, user="alice", query="embeddings", limit=3)
 
     assert {"term": {"user": "alice"}} in seen["body"]["query"]["bool"]["filter"]
-    assert seen["body"]["query"]["bool"]["must"][0]["semantic"]["field"] == "prompt"
+    assert seen["body"]["query"]["bool"]["must"][0]["semantic"]["field"] == "memo"
+    # agent-loop duplicates collapse to one row per distinct question
+    assert seen["body"]["collapse"] == {"field": "prompt_hash"}
     assert seen["url"].endswith("/eis-agent-memory/_search")
     assert out[0]["you_asked"] == "p"
 
@@ -99,3 +105,51 @@ def test_mcp_endpoint_requires_the_bearer_token(monkeypatch):
         # With a valid token the guard passes through to the MCP app, which
         # rejects a non-MCP body itself - anything but 401 proves auth passed.
         assert client.post("/mcp/", json={}, headers=AUTH).status_code != 401
+
+
+def test_same_question_hashes_identically_across_agent_loop_turns():
+    """Mid-loop requests repeat the latest user turn with different answers;
+    they must share a hash so recall collapses them to one result."""
+    a = _collector(content=("partial, calling a tool",)).memory_event()
+    b = _collector(content=("the final answer",)).memory_event()
+    assert a["prompt_hash"] == b["prompt_hash"]
+    assert a["memo"] != b["memo"]
+
+
+def test_hash_ignores_case_and_surrounding_whitespace():
+    base = [{"role": "user", "content": "Embed The Chat History?"}]
+    spaced = [{"role": "user", "content": "  embed the chat history?  "}]
+    assert (_collector(messages=base).memory_event()["prompt_hash"]
+            == _collector(messages=spaced).memory_event()["prompt_hash"])
+
+
+def test_anaphoric_followup_carries_the_conversation_topic():
+    """"summarize that" is meaningless standalone - without the opening
+    question the memory row cannot be understood or retrieved."""
+    e = _collector(messages=[
+        {"role": "user", "content": "Explain what telemetry.py does"},
+        {"role": "assistant", "content": "It emits usage events..."},
+        {"role": "user", "content": "summarize that in one sentence"},
+    ], content=("Telemetry records per-request usage.",)).memory_event()
+    assert e["prompt"] == "summarize that in one sentence"
+    assert e["topic"] == "Explain what telemetry.py does"
+    assert e["memo"].startswith("Topic: Explain what telemetry.py does\nQ: summarize that")
+
+
+def test_first_turn_does_not_repeat_itself_as_topic():
+    e = _collector().memory_event()
+    assert e["topic"] == e["prompt"]
+    assert e["memo"].startswith("Q: ")  # no redundant Topic: line
+
+
+def test_client_housekeeping_is_not_mistaken_for_the_topic():
+    """OpenCode injects a title-generation instruction as a leading user
+    turn; treating it as the conversation's subject mislabels the row."""
+    e = _collector(messages=[
+        {"role": "user", "content": "Generate a title for this conversation:"},
+        {"role": "user", "content": "Explain what telemetry.py does"},
+        {"role": "assistant", "content": "..."},
+        {"role": "user", "content": "now in one sentence"},
+    ], content=("Short answer.",)).memory_event()
+    assert e["topic"] == "Explain what telemetry.py does"
+    assert "Generate a title" not in e["memo"]

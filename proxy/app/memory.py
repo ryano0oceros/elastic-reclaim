@@ -38,13 +38,16 @@ async def search_memory(
         "size": max(1, min(limit, MAX_RESULTS)),
         "query": {
             "bool": {
-                "must": [{"semantic": {"field": "prompt", "query": query}}],
+                "must": [{"semantic": {"field": "memo", "query": query}}],
                 # Scoped to the caller. Recall is for your own history; one
                 # developer's prompts are not another's to browse.
                 "filter": [{"term": {"user": user}}],
             }
         },
-        "_source": ["@timestamp", "prompt", "response", "model_alias"],
+        # One question produces many agent-loop requests; collapse so recall
+        # returns distinct questions rather than the same one repeatedly.
+        "collapse": {"field": "prompt_hash"},
+        "_source": ["@timestamp", "topic", "prompt", "response", "model_alias"],
     }
     response = await client.post(
         url, json=body, headers={"Authorization": f"ApiKey {settings.elastic_api_key}"}
@@ -59,6 +62,9 @@ async def search_memory(
             "when": h["_source"].get("@timestamp", "")[:19],
             "score": round(h.get("_score") or 0, 3),
             "model": h["_source"].get("model_alias"),
+            # Surface the topic when the question itself is a follow-up,
+            # so the row is intelligible without the rest of the thread.
+            "topic": h["_source"].get("topic"),
             "you_asked": h["_source"].get("prompt"),
             "answer_excerpt": (h["_source"].get("response") or "")[:600],
         }
@@ -107,8 +113,15 @@ def build_mcp_server(get_client, settings: Settings) -> MCPServer:
             return f"No past conversations found for {user!r} matching that topic."
         lines = [f"{len(results)} past exchange(s) for {user!r}:\n"]
         for r in results:
+            topic = r.get("topic")
+            context = (
+                f"  In a conversation about: {topic}\n"
+                if topic and topic != r["you_asked"]
+                else ""
+            )
             lines.append(
                 f"[{r['when']} · {r['model']} · score {r['score']}]\n"
+                f"{context}"
                 f"  You asked: {r['you_asked']}\n"
                 f"  Answer: {r['answer_excerpt']}\n"
             )
