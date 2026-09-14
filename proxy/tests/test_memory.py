@@ -153,3 +153,19 @@ def test_client_housekeeping_is_not_mistaken_for_the_topic():
     ], content=("Short answer.",)).memory_event()
     assert e["topic"] == "Explain what telemetry.py does"
     assert "Generate a title" not in e["memo"]
+
+
+def test_mcp_endpoint_is_served_at_the_mount_root(monkeypatch):
+    """Pins the mount path. The SDK defaults its route to "/mcp", which
+    nested under our mount would serve at /mcp/mcp and 404 the documented
+    URL - a mistake that only shows up over the wire."""
+    with _client_with_handler(monkeypatch, _success_handler) as client:
+        r = client.post(
+            "/mcp/",
+            headers={**AUTH, "Accept": "application/json, text/event-stream"},
+            json={"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                  "params": {"protocolVersion": "2025-06-18", "capabilities": {},
+                             "clientInfo": {"name": "t", "version": "1"}}},
+        )
+        assert r.status_code == 200, r.text
+        assert "mcp-session-id" in {k.lower() for k in r.headers}

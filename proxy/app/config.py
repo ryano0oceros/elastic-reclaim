@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     # Semantically searchable record of past exchanges, queried back by the
     # MCP recall tool. Same content class as captures, same toggle.
     memory_data_stream: str = "eis-agent-memory"
+    # Host allowlist for the MCP endpoint. Empty (the default) disables
+    # DNS-rebinding protection, which otherwise rejects every Host header
+    # including the load balancer's. Set it to pin Hosts as defence in depth.
+    mcp_allowed_hosts: list[str] = []
 
     # Cost attribution. Maps a model alias to its rate per 1M tokens, e.g.
     # {"claude": {"input_per_1m": 4.5, "output_per_1m": 21.0}}. Rates are

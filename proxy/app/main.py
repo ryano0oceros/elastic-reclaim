@@ -11,7 +11,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app import telemetry
 from app.config import settings
-from app.memory import build_mcp_server
+from app.memory import build_mcp_asgi_app
 from app.schemas import ChatCompletionRequest
 from app.translator import (
     collect_non_streaming_response,
@@ -45,7 +45,7 @@ async def lifespan(app: FastAPI):
     # app breaks any second startup in the same process (every test that
     # constructs another TestClient, and in-process restarts generally).
     global _mcp_app
-    _mcp_app = build_mcp_server(lambda: _client, settings).streamable_http_app()
+    _mcp_app = build_mcp_asgi_app(lambda: _client, settings)
     async with _mcp_app.router.lifespan_context(_mcp_app):
         try:
             yield

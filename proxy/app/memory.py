@@ -16,6 +16,7 @@ from typing import Any
 
 import httpx
 from mcp.server.mcpserver import Context, MCPServer
+from mcp.server.transport_security import TransportSecuritySettings
 
 from app.config import Settings
 
@@ -128,3 +129,28 @@ def build_mcp_server(get_client, settings: Settings) -> MCPServer:
         return "\n".join(lines)
 
     return mcp
+
+
+def build_mcp_asgi_app(get_client, settings: Settings):
+    """ASGI app for the MCP endpoint, ready to mount at /mcp.
+
+    Owns two transport details that are easy to get wrong:
+
+    - `streamable_http_path="/"`, because the SDK defaults its route to
+      "/mcp" and nesting that under our mount would serve /mcp/mcp.
+    - DNS-rebinding protection. It defaults ON with an *empty* host
+      allowlist, which rejects every Host header - including the load
+      balancer's, so every real request 400s. That protection exists to stop
+      a malicious web page reaching an MCP server bound to localhost; this
+      is a remote service behind an ALB where the bearer token is the access
+      control. Disabled deliberately rather than left silently broken, and
+      re-enabled automatically if you set mcp_allowed_hosts for Host pinning
+      as defence in depth.
+    """
+    return build_mcp_server(get_client, settings).streamable_http_app(
+        streamable_http_path="/",
+        transport_security=TransportSecuritySettings(
+            enable_dns_rebinding_protection=bool(settings.mcp_allowed_hosts),
+            allowed_hosts=list(settings.mcp_allowed_hosts),
+        ),
+    )

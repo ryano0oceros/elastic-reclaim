@@ -51,6 +51,21 @@ config = {
             "models": {alias: {"name": f"{alias} (via EIS)"} for alias in sorted(model_map)},
         }
     },
+    # Agent memory. The proxy serves recall over this developer's own past
+    # exchanges, so the assistant can look up prior work instead of
+    # re-deriving it. Same bearer token as inference; the proxy holds the
+    # Elasticsearch credential so developers need none of their own.
+    "mcp": {
+        "eis-memory": {
+            "type": "remote",
+            "url": "{env:EIS_MCP_URL}",
+            "enabled": True,
+            "headers": {
+                "Authorization": "Bearer {env:OPENAI_API_KEY}",
+                "X-EIS-User": username,
+            },
+        }
+    },
 }
 path = pathlib.Path(out_dir) / "opencode.json"
 path.write_text(json.dumps(config, indent=2) + "\n")
@@ -63,6 +78,8 @@ cat > "$ENV_FILE" <<EOF
 #   set -a; source eis-proxy.env; set +a
 OPENAI_API_BASE=$BASE_URL
 OPENAI_API_KEY=$TOKEN
+# Agent-memory MCP endpoint. Sibling of /v1, not nested under it.
+EIS_MCP_URL=${BASE_URL%/v1}/mcp/
 EOF
 chmod 600 "$ENV_FILE"
 echo "wrote $ENV_FILE (mode 600 - contains the shared bearer token)"
