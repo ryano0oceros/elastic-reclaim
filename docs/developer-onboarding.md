@@ -106,6 +106,23 @@ config change on their side, then they'll re-issue your `opencode.json`.
   response content, retained 30 days, for query analytics. The platform
   team's own runbook requires telling you when this is on. If in doubt, ask.
 
+## Memory: asking about your own past work
+
+If the platform team has capture enabled, the assistant can search **your
+own** past conversations with it. Just refer to earlier work naturally:
+
+- *"have I asked about this before?"*
+- *"what did we decide about the retention policy?"*
+- *"use the approach I used last time"*
+
+The model calls a `recall_past_work` tool and gets back your prior questions
+with answer excerpts and dates. It works across models - a question you
+asked GPT can be recalled in a Claude session.
+
+Two things to know: recall searches **only your own** history, and it is
+subject to the same capture toggle described above, so it exists only while
+the platform team has that on.
+
 ## Troubleshooting
 
 | Symptom | Likely cause |
@@ -115,4 +132,6 @@ config change on their side, then they'll re-issue your `opencode.json`.
 | `Unknown model '...'` | Your `opencode.json` is older than the platform's model list - request a regenerated one |
 | Connection refused / timeout | Proxy URL changed or service down - confirm `$OPENAI_API_BASE` with the platform team |
 | `502` mentioning upstream auth | Platform-side Elastic credential issue - not your setup; report it |
+| `recall_past_work` returns nothing | Either capture is off (ask the platform team) or you have no history yet on this topic - memory starts from when capture was enabled |
+| Memory tool missing entirely | `EIS_MCP_URL` is not set - re-source your env file, or ask for a regenerated bundle |
 | Model responds but tools fail | Report it with the model name - protocol quirks are handled proxy-side (README "Protocol compatibility notes") |
