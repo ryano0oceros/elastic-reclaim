@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     capture_llm_traffic: bool = False
     usage_data_stream: str = "eis-proxy-usage"
     capture_data_stream: str = "eis-proxy-captures"
+    # Semantically searchable record of past exchanges, queried back by the
+    # MCP recall tool. Same content class as captures, same toggle.
+    memory_data_stream: str = "eis-agent-memory"
 
     # Cost attribution. Maps a model alias to its rate per 1M tokens, e.g.
     # {"claude": {"input_per_1m": 4.5, "output_per_1m": 21.0}}. Rates are

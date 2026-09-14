@@ -11,6 +11,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app import telemetry
 from app.config import settings
+from app.memory import build_mcp_server
 from app.schemas import ChatCompletionRequest
 from app.translator import (
     collect_non_streaming_response,
@@ -26,6 +27,8 @@ logger = logging.getLogger("eis-proxy")
 _MAX_UPSTREAM_ERROR_CHARS = 500
 
 _client: httpx.AsyncClient | None = None
+# Set by the lifespan; see the comment there for why it is not built at import.
+_mcp_app = None
 
 
 @asynccontextmanager
@@ -37,11 +40,19 @@ async def lifespan(app: FastAPI):
             "Running with ALLOW_UNAUTHENTICATED=true - every caller that can "
             "reach this port can spend your Elastic inference budget."
         )
-    try:
-        yield
-    finally:
-        await telemetry.drain()
-        await _client.aclose()
+    # Built per app-start, not once at import: the MCP session manager
+    # refuses a second run() on the same instance, so a reused module-level
+    # app breaks any second startup in the same process (every test that
+    # constructs another TestClient, and in-process restarts generally).
+    global _mcp_app
+    _mcp_app = build_mcp_server(lambda: _client, settings).streamable_http_app()
+    async with _mcp_app.router.lifespan_context(_mcp_app):
+        try:
+            yield
+        finally:
+            await telemetry.drain()
+            await _client.aclose()
+            _mcp_app = None
 
 
 app = FastAPI(title="OpenAI-to-EIS Proxy", lifespan=lifespan)
@@ -270,3 +281,34 @@ async def _raise_for_upstream_error(
         status_code=response.status_code,
         detail=f"EIS upstream error: {detail}",
     )
+
+
+# MCP endpoint for agent memory. Mounted behind the same bearer token as
+# /v1/* - the proxy holds the Elasticsearch credential so developers never
+# need one of their own.
+@app.middleware("http")
+async def guard_mcp(request: Request, call_next):
+    if request.url.path.startswith("/mcp"):
+        presented = (request.headers.get("authorization") or "").removeprefix("Bearer ").strip()
+        if settings.require_auth and not secrets.compare_digest(
+            presented, settings.proxy_api_key or ""
+        ):
+            return JSONResponse(
+                {"detail": "Invalid or missing bearer token."},
+                status_code=401,
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+    return await call_next(request)
+
+
+async def _mcp_asgi(scope, receive, send):
+    """Forward to the lifespan-owned MCP app, which is rebuilt each startup."""
+    if _mcp_app is None:
+        await JSONResponse({"detail": "MCP not initialized."}, status_code=503)(
+            scope, receive, send
+        )
+        return
+    await _mcp_app(scope, receive, send)
+
+
+app.mount("/mcp", _mcp_asgi)

@@ -3,3 +3,5 @@ uvicorn[standard]==0.52.4
 httpx==0.28.1
 pydantic==2.13.5
 pydantic-settings==2.15.0
+# MCP server for the agent-memory recall tool (app/memory.py).
+mcp==2.2.0

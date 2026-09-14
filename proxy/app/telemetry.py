@@ -29,6 +29,9 @@ _MAX_USER_PROMPT_CHARS = 2000
 # giant tool result from burying the rest of the exchange.
 _MAX_TURN_CHARS = 400
 _MAX_CONVERSATION_CHARS = 6000
+# Recall shows an excerpt to orient you, not the full answer - the agent can
+# always ask a follow-up. Caps index size and keeps tool output readable.
+_MAX_MEMORY_RESPONSE_CHARS = 2000
 
 # Keeps strong references to in-flight writes (create_task alone is not
 # enough - the loop holds tasks weakly) and gives tests a drain() hook.
@@ -251,6 +254,32 @@ class UsageCollector:
         }
 
 
+    def memory_event(self) -> dict | None:
+        """One recallable exchange: the question asked and the answer given.
+
+        Deliberately narrower than capture_event - no system prompt, no tool
+        traffic, no raw JSON. What makes an exchange worth recalling later is
+        the question and its conclusion; the surrounding machinery is noise
+        that would dilute the embedding and bloat the index.
+        """
+        if not self.capture:
+            return None
+        prompt = self._latest_user_prompt(self.request_messages)
+        response = "".join(self._content_parts).strip()
+        # An exchange with no question or no answer is not worth recalling,
+        # and an empty semantic_text field costs an inference call to embed.
+        if not prompt or not response:
+            return None
+        return {
+            "@timestamp": datetime.now(timezone.utc).isoformat(),
+            "user": self.user,
+            "model_alias": self.model_alias,
+            "prompt": prompt,
+            "response": response[:_MAX_MEMORY_RESPONSE_CHARS],
+            "total_tokens": self.usage.get("total_tokens"),
+        }
+
+
 def emit(
     client: httpx.AsyncClient | None,
     settings: Settings,
@@ -261,9 +290,14 @@ def emit(
     if client is None:
         return
     _submit(client, settings, settings.usage_data_stream, collector.usage_event(status))
+    if status != "success":
+        return
     capture_doc = collector.capture_event()
-    if capture_doc is not None and status == "success":
+    if capture_doc is not None:
         _submit(client, settings, settings.capture_data_stream, capture_doc)
+    memory_doc = collector.memory_event()
+    if memory_doc is not None:
+        _submit(client, settings, settings.memory_data_stream, memory_doc)
 
 
 def _submit(
