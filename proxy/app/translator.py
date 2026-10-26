@@ -192,10 +192,45 @@ async def stream_openai_chunks(
     yield _DONE
 
 
+def _accumulate_tool_call_deltas(calls: dict[int, dict], deltas) -> None:
+    """Merge one chunk's `delta.tool_calls` into `calls`, keyed by `index`.
+
+    A single tool call arrives spread over many deltas: typically the first
+    carries `id`, `type` and `function.name`, and the rest carry fragments of
+    `function.arguments`. String fields concatenate, as in the OpenAI SDK's own
+    stream accumulator - except `type`, which is a fixed tag that some
+    upstreams repeat on every delta, so the latest value wins instead.
+    """
+    if not isinstance(deltas, list):
+        return
+    for position, delta in enumerate(deltas):
+        if not isinstance(delta, dict):
+            continue
+        index = delta.get("index", position)
+        call = calls.setdefault(
+            index, {"id": "", "type": "", "function": {"name": "", "arguments": ""}}
+        )
+        if delta.get("id"):
+            call["id"] += delta["id"]
+        if delta.get("type"):
+            call["type"] = delta["type"]
+        function = delta.get("function")
+        if isinstance(function, dict):
+            for key in ("name", "arguments"):
+                if function.get(key):
+                    call["function"][key] += function[key]
+
+
 def collect_non_streaming_response(chunks: list[dict]) -> dict:
     """Fold a list of already-unwrapped chat.completion.chunk dicts into a single
-    non-streaming chat.completion response, for clients that set stream=false."""
+    non-streaming chat.completion response, for clients that set stream=false.
+
+    Tool calls must be folded too, not just content: a response that says
+    `finish_reason: "tool_calls"` but carries no `tool_calls` leaves a
+    non-streaming client unable to ever complete its tool loop.
+    """
     content_parts: list[str] = []
+    tool_calls: dict[int, dict] = {}
     completion_id = "chatcmpl-eis-proxy"
     model = None
     usage = None
@@ -210,8 +245,19 @@ def collect_non_streaming_response(chunks: list[dict]) -> dict:
             delta = choice.get("delta", {})
             if delta.get("content"):
                 content_parts.append(delta["content"])
+            _accumulate_tool_call_deltas(tool_calls, delta.get("tool_calls"))
             if choice.get("finish_reason"):
                 finish_reason = choice["finish_reason"]
+
+    message: dict = {"role": "assistant", "content": "".join(content_parts)}
+    if tool_calls:
+        message["tool_calls"] = [
+            {**call, "type": call["type"] or "function"}
+            for _, call in sorted(tool_calls.items())
+        ]
+        # OpenAI sends null, not "", when the assistant only calls tools.
+        if not message["content"]:
+            message["content"] = None
 
     response = {
         "id": completion_id,
@@ -220,7 +266,7 @@ def collect_non_streaming_response(chunks: list[dict]) -> dict:
         "choices": [
             {
                 "index": 0,
-                "message": {"role": "assistant", "content": "".join(content_parts)},
+                "message": message,
                 "finish_reason": finish_reason,
             }
         ],
