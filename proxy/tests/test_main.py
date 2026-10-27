@@ -229,6 +229,148 @@ def test_chat_completions_non_streaming_returns_single_json(client):
     assert data["choices"][0]["message"]["content"] == "Hi there"
 
 
+# --- tool calls ------------------------------------------------------------
+#
+# Regression coverage for a real failure: the non-streaming fold kept only
+# `delta.content`, so a stream=false client got `finish_reason: "tool_calls"`
+# with no `tool_calls` and could never complete a tool loop. OpenCode always
+# streams, which is how it went unnoticed. The body mirrors EIS's shape: one
+# call split across several deltas, a null-`type` filler delta, and `type`
+# repeated on an argument fragment.
+
+
+def _sse_event(chunk: dict) -> str:
+    return f"event: message\ndata: {json.dumps({'chat_completion': chunk})}\n\n"
+
+
+def _tool_call_chunk(delta: dict, finish_reason=None) -> dict:
+    return {
+        "id": "chatcmpl-tc",
+        "model": "anthropic-claude-4.5-haiku",
+        "object": "chat.completion.chunk",
+        "choices": [{"index": 0, "delta": delta, "finish_reason": finish_reason}],
+    }
+
+
+TOOL_CALL_SSE_BODY = "".join(
+    [
+        _sse_event(_tool_call_chunk({"role": "assistant", "content": ""})),
+        _sse_event(
+            _tool_call_chunk(
+                {
+                    "tool_calls": [
+                        {
+                            "index": 0,
+                            "id": "toolu_01",
+                            "type": "function",
+                            "function": {"name": "read", "arguments": ""},
+                        }
+                    ]
+                }
+            )
+        ),
+        _sse_event(_tool_call_chunk({"tool_calls": [{"index": 0, "type": None}]})),
+        _sse_event(
+            _tool_call_chunk(
+                {"tool_calls": [{"index": 0, "function": {"arguments": '{"path": '}}]}
+            )
+        ),
+        _sse_event(
+            _tool_call_chunk(
+                {
+                    "tool_calls": [
+                        {
+                            "index": 0,
+                            "type": "function",
+                            "function": {"arguments": '"README.md"}'},
+                        }
+                    ]
+                }
+            )
+        ),
+        _sse_event(_tool_call_chunk({}, finish_reason="tool_calls")),
+        "event: message\ndata: [DONE]\n\n",
+    ]
+)
+
+
+def _tool_call_handler(request: httpx.Request) -> httpx.Response:
+    return httpx.Response(
+        200, text=TOOL_CALL_SSE_BODY, headers={"content-type": "text/event-stream"}
+    )
+
+
+def _tool_call_request(stream: bool) -> dict:
+    return {
+        "model": "claude",
+        "stream": stream,
+        "tool_choice": "required",
+        "tools": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "read",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"path": {"type": "string"}},
+                    },
+                },
+            }
+        ],
+        "messages": [{"role": "user", "content": "read the readme"}],
+    }
+
+
+def test_non_streaming_response_carries_tool_calls(monkeypatch):
+    with _client_with_handler(monkeypatch, _tool_call_handler) as test_client:
+        response = test_client.post(
+            "/v1/chat/completions", headers=AUTH, json=_tool_call_request(False)
+        )
+
+    assert response.status_code == 200
+    choice = response.json()["choices"][0]
+    assert choice["finish_reason"] == "tool_calls"
+    assert choice["message"] == {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [
+            {
+                "id": "toolu_01",
+                "type": "function",
+                "function": {"name": "read", "arguments": '{"path": "README.md"}'},
+            }
+        ],
+    }
+
+
+def test_streaming_response_relays_tool_call_deltas(monkeypatch):
+    with _client_with_handler(monkeypatch, _tool_call_handler) as test_client:
+        response = test_client.post(
+            "/v1/chat/completions", headers=AUTH, json=_tool_call_request(True)
+        )
+
+    assert response.status_code == 200
+    chunks = [
+        json.loads(line[len("data: ") :])
+        for line in response.text.splitlines()
+        if line.startswith("data: ") and line != "data: [DONE]"
+    ]
+    deltas = [
+        call
+        for chunk in chunks
+        for call in chunk["choices"][0]["delta"].get("tool_calls", [])
+    ]
+
+    # The filler delta is dropped; every real fragment keeps its `index`.
+    assert all(call["index"] == 0 for call in deltas)
+    assert deltas[0]["id"] == "toolu_01"
+    assert deltas[0]["function"]["name"] == "read"
+    arguments = "".join(call.get("function", {}).get("arguments", "") for call in deltas)
+    assert json.loads(arguments) == {"path": "README.md"}
+    assert chunks[-1]["choices"][0]["finish_reason"] == "tool_calls"
+    assert response.text.strip().endswith("data: [DONE]")
+
+
 # --- upstream error handling ----------------------------------------------
 #
 # Regression coverage for a fail-open bug: the streaming path used to raise

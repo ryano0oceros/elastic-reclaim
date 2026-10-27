@@ -134,6 +134,57 @@ def test_collect_non_streaming_response_concatenates_content():
     assert response["usage"]["total_tokens"] == 44
 
 
+def test_collect_non_streaming_response_folds_parallel_tool_calls():
+    def chunk(delta, finish_reason=None):
+        return {
+            "id": "chatcmpl-tc",
+            "model": "m",
+            "object": "chat.completion.chunk",
+            "choices": [{"index": 0, "delta": delta, "finish_reason": finish_reason}],
+        }
+
+    unwrapped_chunks = [
+        chunk({"role": "assistant", "content": "Checking both."}),
+        chunk(
+            {
+                "tool_calls": [
+                    {"index": 0, "id": "call_a", "type": "function",
+                     "function": {"name": "read", "arguments": '{"p":'}},
+                    {"index": 1, "id": "call_b", "type": "function",
+                     "function": {"name": "glob", "arguments": ""}},
+                ]
+            }
+        ),
+        # Interleaved fragments, out of index order.
+        chunk({"tool_calls": [{"index": 1, "function": {"arguments": '{"q":"*"}'}}]}),
+        chunk({"tool_calls": [{"index": 0, "type": "function",
+                               "function": {"arguments": '"a"}'}}]}),
+        chunk({}, finish_reason="tool_calls"),
+    ]
+
+    message = collect_non_streaming_response(unwrapped_chunks)["choices"][0]["message"]
+
+    # Text alongside tool calls is kept, not nulled.
+    assert message["content"] == "Checking both."
+    assert message["tool_calls"] == [
+        {"id": "call_a", "type": "function",
+         "function": {"name": "read", "arguments": '{"p":"a"}'}},
+        {"id": "call_b", "type": "function",
+         "function": {"name": "glob", "arguments": '{"q":"*"}'}},
+    ]
+
+
+def test_collect_non_streaming_response_omits_tool_calls_when_none():
+    unwrapped_chunks = [
+        {"choices": [{"index": 0, "delta": {"role": "assistant", "content": ""}}]},
+        {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]},
+    ]
+
+    message = collect_non_streaming_response(unwrapped_chunks)["choices"][0]["message"]
+
+    assert message == {"role": "assistant", "content": ""}
+
+
 # --- upstream field allowlist ---------------------------------------------
 #
 # Regression coverage for a real failure: OpenCode attaches Anthropic's

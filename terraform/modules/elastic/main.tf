@@ -73,11 +73,18 @@ resource "elasticstack_elasticsearch_security_api_key" "proxy" {
       # Analytics writes only: create_doc cannot update or delete existing
       # documents, create_index lets the first write lazily create the data
       # stream, auto_configure permits the template-driven mapping. The key
-      # still cannot read any data or touch any other index.
+      # cannot read the analytics streams or touch any other index.
       indices = [
         {
           names      = ["eis-proxy-usage*", "eis-proxy-captures*"]
           privileges = ["create_doc", "create_index", "auto_configure"]
+        },
+        {
+          # Agent memory needs `read` in addition to write - this is the one
+          # index the proxy queries back out, to answer recall requests from
+          # the MCP tool. Still scoped to this index pattern only.
+          names      = ["eis-agent-memory*"]
+          privileges = ["create_doc", "create_index", "auto_configure", "read"]
         }
       ]
     }

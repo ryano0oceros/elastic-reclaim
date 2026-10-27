@@ -294,6 +294,45 @@ Things worth knowing:
 - **Scope**: EIS inference only. The Serverless project's VCU compute charge
   is a separate line item and is not represented here.
 
+## Agent memory (semantic recall)
+
+The same captured exchanges that feed Query Analytics are also indexed into
+`eis-agent-memory`, where a `semantic_text` field embeds them via EIS ELSER
+(`.elser-2-elastic`). The proxy exposes them to OpenCode as an MCP tool at
+`/mcp`, so the assistant can look up prior work instead of re-deriving it.
+
+Gated by the same `capture_requests` toggle - it is the same content class -
+with 90-day retention (longer than captures' 30d, since memory is only
+useful if it reaches back past what you have forgotten).
+
+```bash
+# developers get it automatically; dev-setup.sh writes the mcp block and
+# the EIS_MCP_URL env var into their bundle
+scripts/dev-setup.sh alice
+```
+
+In a session: *"have I asked about telemetry.py before?"* → the model calls
+`recall_past_work`, which semantic-searches that developer's own history.
+
+Operational notes:
+
+- **Recall is scoped to the calling developer** (`term` filter on `user`).
+  One person's prompts are not another's to browse. The user comes from the
+  same self-reported `X-EIS-User` header as usage attribution, so it selects
+  whose history to read - it does not authenticate. The bearer token is what
+  authorizes the call. SSO would fix both together.
+- **Results collapse on a prompt hash.** One developer question drives many
+  requests inside an agent loop; the raw corpus held 132 rows for 30 distinct
+  questions, so uncollapsed recall returns the same item repeatedly.
+- **Embedding spend does not appear in the Cost & Spend dashboard.**
+  `semantic_text` embeds inside Elasticsearch at ingest, not through the
+  proxy, so those tokens bypass the proxy's telemetry and show up only in
+  Elastic billing under the `Inference` dimension. ELSER is cheap
+  ($0.08/1M tokens against $3-$35 for chat), but the gap is real.
+- **Retention is enforced by the data stream lifecycle**, so turning capture
+  off stops new memory but does not erase existing memory. Delete the data
+  stream if you need that.
+
 ## Request capture (query analytics)
 
 Off by default. To record full request messages + response text:

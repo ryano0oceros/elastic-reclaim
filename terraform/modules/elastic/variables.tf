@@ -33,3 +33,15 @@ variable "eis_models" {
     gpt    = "openai-gpt-5.4"
   }
 }
+
+variable "memory_inference_id" {
+  description = <<-EOT
+    Inference endpoint used to embed agent-memory prompts. Defaults to
+    Elastic's preconfigured EIS ELSER endpoint, so recall is billed to the
+    same committed capacity as chat completion. Sparse (ELSER) rather than
+    dense: it needs no dimension/similarity tuning and handles the short,
+    jargon-heavy phrasing of developer questions well.
+  EOT
+  type        = string
+  default     = ".elser-2-elastic"
+}
